@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from warnings import filterwarnings
 from sklearn.linear_model import LogisticRegression as lr
+from sklearn.ensemble import RandomForestClassifier as rfc
 from sklearn.metrics import accuracy_score, confusion_matrix
 import ta
 
@@ -190,12 +191,27 @@ df2 = (df1.assign(
     dailyRange = df1['high'] - df1['low'], # shows volatility
     mvAvg7days = df1['close'].rolling(window = 7).mean(), # signal trends possibly
     mvAvg14days = df1['close'].rolling(window = 14).mean(), # signal trends possibly
+    mvAvg30days = df1['close'].rolling(window = 30).mean(), # added after first pass, trying to refine features
     volChange = (df1['volume'] - df1['volume'].shift(1)) / df1['volume'].shift(1) # stronger conviction on the trade
 ))
 
 # looking at trends over multiple days
 for i in range(1, 4):
     df2[f'returnLag{i}'] = df2['dailyReturn'].shift(i)
+
+# additional features added post first pass, weekly returns (time resampled), RSI (relative strength index):
+# where rsi > 70, stock might be due for a drop, and rsi < 70, due for upswing
+# MACD (moving avg convergence divergence): diff btw 2 avgs, indicates momentum,
+# if macd crosses above signal line, trending upwards; crosses below, trending down
+df2.set_index('date', inplace = True)
+df2['weeklyReturns'] = df2['close'].resample('W').last().pct_change()
+df2['rsi'] = ta.momentum.RSIIndicator(df2['close'], window = 14).rsi()
+
+macd = ta.trend.MACD(df2['close'])
+df2['macd'] = macd.macd()
+df2['macd_signal'] = macd.macd_signal()
+df2['macd_diff'] = macd.macd_diff()
+
 
 # inspect and remove null values
 print(df2.isnull().sum())
@@ -206,12 +222,14 @@ trainSize = int(len(df2) * 0.75)
 train = df2.iloc[:trainSize]
 test = df2.iloc[trainSize:]
 
-xtrain = train[['dailyReturn', 'prevDayReturn', 'dailyRange', 'mvAvg7days',
-                'mvAvg14days','volChange', 'returnLag1','returnLag2','returnLag3']]
+features = ['weeklyReturns', 'prevDayReturn', 'dailyRange', 'mvAvg7days',
+                'mvAvg14days','mvAvg30days','volChange', 'returnLag1','returnLag2',
+                'returnLag3', 'rsi', 'macd', 'macd_signal','macd_diff']
+
+xtrain = train[features]
 ytrain = train['target']
 
-xtest = test[['dailyReturn', 'prevDayReturn', 'dailyRange', 'mvAvg7days',
-                'mvAvg14days','volChange', 'returnLag1','returnLag2','returnLag3']]
+xtest = test[features]
 ytest = test['target']
 
 # create and apply model
@@ -222,8 +240,20 @@ model.fit(xtrain, ytrain)
 yPred = model.predict(xtest)
 
 # check accuracy
-print(accuracy_score(ytest, yPred))
+print(f"linear regression accuracy score = {accuracy_score(ytest, yPred)}")
 print(confusion_matrix(ytest, yPred))
 # initial run of model gave accuracy score of 0.516 and conf mat of [[1 572], [0 608]]
 # conf mat essentially means that the model is always predicting the stock goes up (hence the roughly 50% accuracy)
 # add more/refine features, try random forest
+
+# random forest
+# on second pass of rf, using shallow trees, bc they perform better for noisy data like stocks (capturing broad, robust patterns)
+rf = rfc(n_estimators = 200, max_depth = 5, min_samples_split = 50, random_state = 42)
+rf.fit(xtrain, ytrain)
+# check for which features are actually being used by the model
+importances = pd.Series(rf.feature_importances_, index = xtrain.columns)
+print(importances.sort_values(ascending = False).head(10))
+rfPred = rf.predict(xtest)
+# check accuracy
+print(f"random forest and improved features accuracy score = {accuracy_score(ytest, rfPred)}")
+print(confusion_matrix(ytest, rfPred))
