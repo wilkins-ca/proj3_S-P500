@@ -5,8 +5,9 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from warnings import filterwarnings
 from sklearn.linear_model import LogisticRegression as lr
+from sklearn.linear_model import LinearRegression as linreg
 from sklearn.ensemble import RandomForestClassifier as rfc
-from sklearn.metrics import accuracy_score, confusion_matrix
+from sklearn.metrics import accuracy_score, confusion_matrix, mean_squared_error, r2_score
 import ta
 
 filterwarnings('ignore')
@@ -204,7 +205,7 @@ for i in range(1, 4):
 # MACD (moving avg convergence divergence): diff btw 2 avgs, indicates momentum,
 # if macd crosses above signal line, trending upwards; crosses below, trending down
 df2.set_index('date', inplace = True)
-df2['weeklyReturns'] = df2['close'].resample('W').last().pct_change()
+df2['weeklyReturns'] = df2['close'].resample('W').last().pct_change().reindex(df2.index, method = 'ffill')
 df2['rsi'] = ta.momentum.RSIIndicator(df2['close'], window = 14).rsi()
 
 macd = ta.trend.MACD(df2['close'])
@@ -227,7 +228,9 @@ features = ['weeklyReturns', 'prevDayReturn', 'dailyRange', 'mvAvg7days',
                 'returnLag3', 'rsi', 'macd', 'macd_signal','macd_diff']
 
 xtrain = train[features]
+print(xtrain.head())
 ytrain = train['target']
+print(ytrain.head())
 
 xtest = test[features]
 ytest = test['target']
@@ -257,3 +260,55 @@ rfPred = rf.predict(xtest)
 # check accuracy
 print(f"random forest and improved features accuracy score = {accuracy_score(ytest, rfPred)}")
 print(confusion_matrix(ytest, rfPred))
+
+
+# price range/volatility prediction; will use regression for first pass, and measure accuracy by 
+# MSE/RSE (lower is better)
+df3 = (df2.assign(
+    ATR14 = np.maximum(
+        df2['high'] - df2['low'], 
+        np.maximum(abs(df2['high'] - df2['close'].shift(1)), 
+                   abs(df2['low'] - df2['close'].shift(1))))
+        .rolling(14).mean()
+)) # ATR14 is rolling mean of true range
+
+print(df3.isnull().sum())
+
+# drop nulls
+df3.dropna(inplace = True)
+
+target = 'ATR14'
+
+train = df3.iloc[:trainSize]
+test = df3.iloc[trainSize:]
+
+xtrain = train[features]
+ytrain = train[target]
+
+print(xtrain)
+print(ytrain)
+
+xtest = test[features]
+ytest = test[target]
+
+print(xtrain.shape, ytrain.shape)
+print(xtest.shape, ytest.shape)
+
+# fit model
+linReg = linreg()
+linReg.fit(xtrain, ytrain)
+
+# make pred
+yPred_lin = linReg.predict(xtest)
+
+# evaluate performance of lin reg model
+mse = mean_squared_error(ytest, yPred_lin)
+rmse = np.sqrt(mse)
+r2 = r2_score(ytest, yPred_lin)
+
+print(f"Linear Reg results: mean squared error = {mse}; root mse = {rmse}; r2 = {r2}")
+# on first pass, mse = 2.77, rmse = 1.66 and r2 = -36.1 (poor performance, however, given
+# how noisy stock volatility is, poor performance is not surprising)
+
+
+# TO DO: TRY SECOND TIME WITH STOCK VOL. USING DIFF MODEL
