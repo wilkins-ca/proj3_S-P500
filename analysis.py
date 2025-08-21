@@ -7,6 +7,7 @@ from warnings import filterwarnings
 from sklearn.linear_model import LogisticRegression as lr
 from sklearn.linear_model import LinearRegression as linreg
 from sklearn.ensemble import RandomForestClassifier as rfc
+from sklearn.ensemble import GradientBoostingRegressor as gradboostreg
 from sklearn.metrics import accuracy_score, confusion_matrix, mean_squared_error, r2_score
 import ta
 
@@ -109,7 +110,7 @@ plt.tight_layout()
 plt.show()
 
 
-# look at quarterly avg return by company
+# look at quarterly avg return by company (time resampling)
 pd.to_datetime(df1['date'])
 df1.set_index('date', inplace = True)
 df1['pct_return'] = df1.groupby('Name')['close'].pct_change() * 100
@@ -310,5 +311,79 @@ print(f"Linear Reg results: mean squared error = {mse}; root mse = {rmse}; r2 = 
 # on first pass, mse = 2.77, rmse = 1.66 and r2 = -36.1 (poor performance, however, given
 # how noisy stock volatility is, poor performance is not surprising)
 
+# now we try gradient boosting regression for the price volatility prediction
+gbr = gradboostreg(
+    n_estimators = 500,
+    learning_rate = 0.05,
+    max_depth = 4,
+    random_state = 42
+)
 
-# TO DO: TRY SECOND TIME WITH STOCK VOL. USING DIFF MODEL
+gbr.fit(xtrain, ytrain)
+ypredgbr = gbr.predict(xtest)
+
+mse_gbr = mean_squared_error(ytest, ypredgbr)
+rmse_gbr = np.sqrt(mse_gbr)
+r2_gbr = r2_score(ytest, ypredgbr)
+
+print(f"grad boost mse = {mse_gbr}; grad boost rmse = {rmse_gbr}; grad boost r2 = {r2_gbr}")
+# with gradient boosting, mse = 0.11, rmse = 0.33, and r2 = -0.48. Much better than plain 
+# linear regression, but still doing worse than predicting mean of target vals
+
+# risk metric with Sharpe ratio: measure of how much excess return per unit risk
+riskFreeRate = 0.0
+
+meanReturn = df3['dailyReturn'].mean()
+std_return = df3['dailyReturn'].std()
+
+sharpe = (meanReturn - riskFreeRate) / std_return
+print(f"Sharpe Ratio (risk metric) = {sharpe}")
+
+# annualized sharpe
+sharpe_ann = (meanReturn * 252) / (std_return * np.sqrt(252))
+print(f"annualized sharpe ratio = {sharpe_ann}")
+
+# checking stability over time of sharpe ratio
+window = 90 # days
+avg90days = df3['dailyReturn'].rolling(window).mean()
+std90days = df3['dailyReturn'].rolling(window).std()
+
+# rolling sharpe not annualized
+rollingsharpe = (avg90days - riskFreeRate) / std90days
+# rolling sharpe annualized
+rollSharpeAnn = (avg90days * 252) / (std90days * np.sqrt(252))
+
+plt.figure(figsize = (9, 6))
+plt.plot(df3.index, rollSharpeAnn, label = "rolling annualized sharpe ratio (90 day window)")
+plt.axhline(0, color = 'red', linestyle = '--', linewidth = 1)
+plt.title("Rolling Annualized sharpe Ratio")
+plt.xlabel("Date")
+plt.ylabel("Sharpe Ratio")
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+# at first pass, significant drops noticed in early 2014 and late 2017, with a spike in early 2017;
+# still very noisy, so trying longer window of 180 days
+# checking stability over time of sharpe ratio
+window = 180 # days
+avgrolling = df3['dailyReturn'].rolling(window).mean()
+stdrolling = df3['dailyReturn'].rolling(window).std()
+
+# rolling sharpe not annualized
+rollingsharpe2 = (avgrolling - riskFreeRate) / stdrolling
+# rolling sharpe annualized
+rollSharpeAnn2 = (avgrolling * 252) / (stdrolling * np.sqrt(252))
+
+plt.figure(figsize = (9, 6))
+plt.plot(df3.index, rollSharpeAnn2, label = "rolling annualized sharpe ratio (180 day window)")
+plt.axhline(0, color = 'red', linestyle = '--', linewidth = 1)
+plt.axhline(1, color = 'red', linestyle = '--', linewidth = 1)
+plt.axhline(2, color = 'red', linestyle = '--', linewidth = 1)
+plt.title("Rolling Annualized sharpe Ratio")
+plt.xlabel("Date")
+plt.ylabel("Sharpe Ratio")
+plt.legend()
+plt.tight_layout()
+plt.show()
+# ^ 180 window shows big spikes in mid 2013 and early-middle 2017; mostly the rest of the time it hovers around 0
