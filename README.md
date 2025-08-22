@@ -30,8 +30,42 @@
 
 ## Price Movement Classification
 
+* target variable defined to be 1 if stock price increases, 0 if stock price remains the same or decreases
+* features put into first pass: daily return, previous day return, daily price range, moving average over 7 days, moving average over 14 days, change in volume traded, and daily return lagged by 1, 2, and 3 days
+  * first pass was execusted with linear regression model
+* on second pass, weekly returns added as feature, as well as RSI (relative strength index) over a window of 14 days and Moving Average Convergence Divergence
+  * second pass was executed with random forest model
+  * random forest did not perform better than linear regression
+
 ## Price Range/Volatility Prediction
+
+* first pass executed with linear regression
+* ATR14 as input feature (rolling average of "true range", which is a measure of a stock's daily price volatility: max(high - low, |high - previousClose|, |low - previousClose|))
+* evaluated performance using mean squared error, root mean squared error, and coefficient of determination r^2
+* on first pass, MSE = 2.77, RMSE = 1.66, and r^2 = -36.1; this is poor performance, but to be expected, considering how noisy stock data is
+* second pass executed with gradient boosting regression
+* on second pass, MSE = 0.11, RMSE = 0.33, and r^2 = -0.48; better performance, but still not very good
 
 ## Risk Metrics: Sharpe Ratio
 
+* annualized (not rolling) = 0.03
+* not annualized (not rolling) = 0.47
+* when charting stability over time of the sharpe ratio on first pass (window of 90 days), drops noticed in early 2014 and late 2017, and a spike in early 2017
+* on second pass of sharpe stability charting (180 day window), spikes noticed in mid 2013 and early-middle 2017, and otherwise hovered around 0
+
+## Clustering Similar Stocks
+
+* clustered by monthly returns
+* all 500 of S&P 500 stocks used
+* correlation matrix used in calculating distance values, such that highly correlated stocks would be "close" to each other
+* KMeans used for clustering
+* PCA projection used for generation of a scatter plot, with components = 2
+* most of the stocks are clustered around the origin, because most stocks' monthly return behavior is similar
+
 ## Challenges and Lessons Learned
+
+* needed to forward fill when calculating weekly returns
+* made sure to check for nulls and remove where necessary and reasonable
+* predicting stock behavior is known to be a difficult thing, but it seemed that the Gradient Boosted Regression performed the best
+* feature engineering making use of feature importances
+* learned concept of confusion matrix

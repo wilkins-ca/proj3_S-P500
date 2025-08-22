@@ -1,4 +1,5 @@
 import pandas as pd
+import glob
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -7,6 +8,8 @@ from warnings import filterwarnings
 from sklearn.linear_model import LogisticRegression as lr
 from sklearn.linear_model import LinearRegression as linreg
 from sklearn.ensemble import RandomForestClassifier as rfc
+from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
 from sklearn.ensemble import GradientBoostingRegressor as gradboostreg
 from sklearn.metrics import accuracy_score, confusion_matrix, mean_squared_error, r2_score
 import ta
@@ -14,7 +17,7 @@ import ta
 filterwarnings('ignore')
 
 # list of files we want to examine
-pathstring = 'individual_stocks_5yr/'
+pathstring = 'sp500_5yr_data/'
 companylist = [pathstring + 'AAPL_data.csv',
                pathstring + 'AMZN_data.csv',
                pathstring + 'GOOG_data.csv',
@@ -387,3 +390,85 @@ plt.legend()
 plt.tight_layout()
 plt.show()
 # ^ 180 window shows big spikes in mid 2013 and early-middle 2017; mostly the rest of the time it hovers around 0
+
+
+# clustering similar stocks
+
+# read in more stocks, collect in a df
+files = glob.glob("sp500_5yr_data/*.csv") # changed from 150 of the 500 stocks to all 500 on second pass
+
+collected_list = []
+
+for f in files:
+    ticker = f.replace(".csv", "").replace("sp500_5yr_data\\", "")
+    dfTemp = pd.read_csv(f, parse_dates = ["date"])
+    dfTemp.set_index("date", inplace = True)
+
+    # resample
+    monthlyClose = dfTemp["close"].resample("M").last()
+    # monthly returns: less noisy than daily returns
+    monthlyReturns = monthlyClose.pct_change()
+    # store as df
+    collected_list.append(monthlyReturns.rename(ticker))
+
+# merge into one df
+returns = pd.concat(collected_list, axis = 1)
+# handling missing data
+returns = returns.dropna(axis = 0, how = 'any')
+
+print(f"shape of monthly returns df = {returns.shape}")
+print(returns.head())
+
+# correlation matrices are most often used for stock data
+corrmat = returns.corr()
+
+# heat map for above matrix
+plt.figure(figsize = (9, 6))
+sns.heatmap(corrmat, cmap = 'coolwarm', center = 0)
+plt.title('Stock Cluster Correlation Matrix')
+plt.tight_layout()
+plt.show()
+
+# kmeans clustering
+# turning correlation into distance so highly correlated stocks are "close"
+distance = 1 - corrmat
+
+# input distance into kmeans model
+kmeans = KMeans(n_clusters = 5, random_state = 37)
+labels = kmeans.fit_predict(distance)
+
+# add cluster labels to tickers
+clusters = pd.DataFrame({
+    "Ticker": corrmat.columns,
+    "Cluster": labels
+})
+
+print(clusters.sort_values("Cluster").head(20))
+
+# plot with pca viz
+returns_filled = returns.fillna(0).T
+# PCA to 2 components (instead of component per month)
+pca = PCA(n_components = 2)
+components = pca.fit_transform(returns_filled)
+# put into df with cluster labels
+pca_df = pd.DataFrame(components, columns = ['PC1', 'PC2'])
+pca_df['Ticker'] = returns.columns
+pca_df['Cluster'] = labels
+
+# scatter plot for clusters
+plt.figure(figsize = (9, 6))
+for cluster in sorted(pca_df['Cluster'].unique()):
+    subset = pca_df[pca_df['Cluster'] == cluster]
+    plt.scatter(subset['PC1'], subset['PC2'], label = f"Cluster {cluster}", alpha = 0.7)
+
+plt.title("KMeans Clusters of Stocks (PCA Projection)")
+plt.xlabel("principal component 1")
+plt.ylabel("principal component 2")
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+# at first pass, most stocks in cluster 2, which centers mostly on the origin of the pca projection
+# not surprising, bc most stocks have returns that behave similarly. Now we try with all 500 stocks
+
+# 2 clusters when run with all 500 stocks, and still most are centered around the origin
